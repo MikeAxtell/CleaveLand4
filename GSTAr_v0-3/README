@@ -1,0 +1,241 @@
+LICENSE
+    GSTAr.pl
+
+    Copyright (c) 2013 Michael J. Axtell
+
+    This program is free software: you can redistribute it and/or modify it
+    under the terms of the GNU General Public License as published by the
+    Free Software Foundation, either version 3 of the License, or (at your
+    option) any later version.
+
+    This program is distributed in the hope that it will be useful, but
+    WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General
+    Public License for more details.
+
+    You should have received a copy of the GNU General Public License along
+    with this program. If not, see <http://www.gnu.org/licenses/>.
+
+SYNOPSIS
+    GSTAr : Generic Small RNA-Transcriptome Aligner. Flexible
+    RNA-hybridization based alignment of small RNAs (<=26 nts) to a
+    transcriptome.
+
+AUTHOR
+    Michael J. Axtell, Penn State University, mja18@psu.edu
+
+VERSION
+    0.3 : September 14, 2013
+
+INSTALL
+  Dependencies
+
+    perl bowtie (version 0.12.x or 1.x) bowtie-build RNAplex (from Vienna
+    RNA package)
+
+    bowtie, bowtie-build, and RNAplex must be executable from your PATH
+
+  Installation
+
+    No "real" installation. If the script is in your working directory, you
+    can call it with
+
+    ./GSTAr.pl
+
+    For convenience, you can add it to your PATH. e.g.
+
+        sudo mv GSTAr.pl /usr/bin/
+
+    GSTAr.pl expects to find perl in /usr/bin/perl .. if not, edit line 1
+    (the hashbang) accordingly.
+
+USAGE
+        GSTAr.pl [options] queries.fasta transcriptome.fasta
+
+    Output alignments go to STDOUT, and can be redirected to a file with >
+    or piped to another process with |
+
+    Log and progress information goes to STDERR, and can be suppressed with
+    option -q (quiet mode).
+
+  Options
+
+    Options:
+
+    -h Print help message and quit
+
+    -v Print version and quit
+
+    -q Quiet mode .. no log/progress information to STDERR
+
+    -t Tabular output format ... More suitable for parsing
+
+    -a Sort by Allen et al. score instead of the default MFEratio
+
+    -s [integer 6..15] Hit seed length required to initiate RNAplex
+    analysis. Default: 7
+
+    -r [float >0..1] Minimum Free Energy Ratio cutoff. Default: 0.65
+
+METHODS
+  Step 1 : Finding short exact matches
+
+    In step one, GSTAr takes in a query small RNA sequence, and breaks it up
+    into a series of k-mers of size specified by option -s (default = 7). It
+    then uses bowtie to find all exact matches, to the reverse complementary
+    strand only, to each of the k-mers. If a bowtie index for the
+    transcriptome.fasta file is not found, GSTAr will use bowtie-build to
+    make one. The hits are consolidated to merge overlapping regions.
+
+  Step 2 : RNAplex analysis
+
+    In step two, transcript regions centered on the hits found in step 1 are
+    extended 20 nts on either side, measuring from the center of the hits.
+    This is followed by hybridization analysis between the full-length query
+    sequence and the extended transcript region. For comparison, a perfectly
+    matched entry is also calculated. The perfectly matched entry has
+    flanking nts added to equal the overall size of the real transcript
+    segments that are being analyzed. The flanking nucleotides surrounding
+    the perfectly matched control site are randomly determined. The Minimum
+    Free Energies (MFEs) are then extracted from the RNAplex results. The
+    MFEratio is calculated as the MFE of the observed site / that of the
+    perfect site. Note that the MFE of a perfect site will vary slightly
+    from run to run with the same query, because the randomly selected
+    flanking nts have slight effects on the calculation. Alignments with an
+    MFEratio at or above the threshold set by option -r (default 0.65) are
+    retained.
+
+  Step 3 : Parsing of alignments
+
+    In step three, alignments that met the MFEratio requirement are parsed
+    to quantify various features, and for output.
+
+    Slice Site is the transcript nt opposite nt 10 of the query. This is
+    where one would expect to find evidence of AGO-catalyzed slicing in the
+    event that a) the transcript was really a target of the query at that
+    site, and b) it really was sliced. GSTAr makes no judgements on the
+    likelihood of either of those events, and the recording of the Slice
+    Site is for convenience when using GSTAr alignments to look for actual
+    experimental evidence of slicing.
+
+    Allen et al. score: This is a score based on the position-specific
+    penalties described by Allen et al. (2005) Cell, 121:207-221 [PMID:
+    15851028]. Specifically, mismatched query bases or target-bulged bases,
+    are penalized 1. G-U wobbles are penalized 0.5. These penalties are
+    double within positions 2-13 of the query.
+
+WARNINGS
+  Not a target predictor
+
+    GSTAr is very explicitly NOT a target predictor for small RNAs. It is
+    only an aligner. Users should make no claims as to whether the
+    identified alignments are actually targets of the query without
+    independent evidence of some sort.
+
+  Slice Sites are not predictions of slicing
+
+    Although GSTAr reports a "Slicing Site" position for each alignment,
+    this is merely for conveneince when using GSTAr alignments to guide
+    subsequent experiments searching for AGO-catalyzed slicing evidence. No
+    claim is made that any alignment is actually cleaved or even
+    theoretically cleavable.
+
+  Not for whole genomes
+
+    GSTAr holds the entire contents of the transcripts.fasta file in memory
+    to speed the isolation of sub-sequences. This will be impractical in
+    terms of memory usage if a user attempts to load a whole genome.
+    Similarly, GSTAr will only search for pairing between the top strand of
+    the transcripts.fasta file, making it also impractical for a genome
+    analysis, where sites might be on either strand.
+
+  Temp files
+
+    GSTAr writes two temp files to the working directory: 'temp_rnas.txt'
+    and 'temp.fasta'. Their contents change dynamically during a run, and
+    they will be deleted at the end of a run. So, don't mess with them
+    during a run. In addition, it is a very bad idea to have two GSTAr runs
+    operating concurrently from the same working directory.
+
+  Performance
+
+    GSTAr will become very slow (but more sensitive) with decreasing values
+    of options -r and/or -s.
+
+  No ambiguity codes
+
+    Query sequences with characters other than A, T, U, C, or G
+    (case-insensitive) will not be analyzed, and a warning will be sent to
+    the user. Transcript sub-sequences for potential alignments will be
+    *silently* ignored if they contain any characters other than A, T, U,
+    C,or G (case-insensitive).
+
+  Small queries
+
+    Query sequences must be small (<=27 nts), but not smaller than option -s
+    (default 7). Queries that don't meet these size requirements will not be
+    analyzed and a warning sent to the user.
+
+OUTPUT
+    Both output formats begin with a series of commented lines that provide
+    details about the run.
+
+  Pretty output
+
+    The default output "pretty" mode is easily parsed by humans and should
+    be self-explanatory
+
+  Tabular output
+
+    Tabular output (which occurs when option -t is specified) is a
+    tab-delimited text file. The first non-commented line is the column
+    headings, with meanings as follows:
+
+    1: Query: Name of query
+
+    2: Transcript: Name of transcript
+
+    3: TStart: One-based start position of the alignment within the
+    transcript
+
+    4: TStop: One-based stop position of the alignment within the transcript
+
+    5: TSLice: One-based position of the alignment opposite position 10 of
+    the query
+
+    6: MFEperfect: Minimum free energy of a perfectly matched site
+    (approximate)
+
+    7: MFEsite: Minimum free energy of the alignment in question
+
+    8: MFEratio: MFEsite / MFEperfect
+
+    9: AllenScore: Penalty score calculated per Allen et al. (2005) Cell,
+    121:207-221 [PMID: 15851028].
+
+    10: Paired: String representing paired positions in the query and
+    transcript. The format is Query5'-Query3',Transcript3'-Transcript5'.
+    Positions are one-based. Discrete blocks of pairing are separated by ;
+
+    11: Unpaired: String representing unpaired positions in the query and
+    transcript. The format is
+    Query5'-Query3',Transcript3'-Transcript5'[code]. Possible codes are
+    "UP5" (Unpaired region at 5' end of query), "UP3" (Unpaired region at 3'
+    end of query), "SIL" (symmetric internal loop), "AILt" (asymmetric
+    internal loop with more unpaired nts on the transcript side), "AILq"
+    (asymmetric internal loop with more unpaired nts on the query side),
+    "BULt" (Bulged on the transcript side), or "BULq" (bulged on the query
+    side). Positions are one-based. Discrete blocks of pairing are separated
+    by ;
+
+    12: Structure: Aligned secondary structure. The region before the "&"
+    represents the transcript, 5'-3', while the region after the "&"
+    represents the query, 5'-3'. "(" represents a transcript base that is
+    paired, ")" represents a query based that is paired, "." represents an
+    unpaired base, and "-" represents a gap inserted to facilitate
+    alignment.
+
+    13: Sequence: Aligned sequence. The region before the "&" represents the
+    transcript, 5'-3', while the region after the "&" represents the query,
+    5'-3'.
+
