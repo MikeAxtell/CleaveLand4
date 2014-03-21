@@ -4,7 +4,7 @@ use strict;
 use Getopt::Std;
 use Math::CDF 'pbinom';
 
-my $version_number = "4.1";
+my $version_number = "4.2";
 my $help = help_message($version_number);
 
 # if there are no arguments, return the help message and quit
@@ -360,7 +360,7 @@ sub check_bowtie_version {
     unless($opt_q) {
 	print STDERR "\tbowtie: ";
     }
-    (open(BTV, "bowtie --version 2>&1 |")) || return 0;
+    (open(BTV, "bowtie --version |")) || return 0;
     my $vline = <BTV>;
     close BTV;
     my $version;
@@ -385,7 +385,7 @@ sub check_bowtie_build_version {
     unless($opt_q) {
 	print STDERR "\tbowtie-build: ";
     }
-    (open(BBV, "bowtie-build --version 2>&1 |")) || return 0;
+    (open(BBV, "bowtie-build --version |")) || return 0;
     my $vline = <BBV>;
     close BBV;
     if($vline =~ /^bowtie-build version (\S+)/) {
@@ -402,7 +402,7 @@ sub check_RNAplex {
     unless($opt_q) {
 	print STDERR "\tRNAplex: ";
     }
-    (open(RD, "RNAplex --version 2>&1 |")) || return 0;
+    (open(RD, "RNAplex --version |")) || return 0;
     my $v = <RD>;
     close RD;
     unless($opt_q) {
@@ -459,7 +459,7 @@ sub check_R_version {
     unless($opt_q) {
 	print STDERR "\tR: ";
     }
-    (open(R, "R --version 2>&1 |")) || return 0;
+    (open(R, "R --version |")) || return 0;
     my $version = <R>;
     close R;
     if($version =~ /version/) {
@@ -510,7 +510,7 @@ sub bowtie_build {
 	print STDERR "Building bowtie index for file $fasta ...\n";
     }
     my $log = "$fasta" . "_bowtie_build_log.txt";
-    system("bowtie-build $fasta $fasta 2>&1> $log");
+    system("bowtie-build $fasta $fasta > $log");
     unless($opt_q) {
 	print STDERR " Done\n";
 	print STDERR "Log for bowtie-build job is at $log\n";
@@ -1232,7 +1232,7 @@ Michael J. Axtell, Penn State University, mja18@psu.edu
 
 =head1 VERSION
 
-4.1 : September 17, 2013
+4.2 : September 20, 2013
 
 =head1 INSTALL
 
