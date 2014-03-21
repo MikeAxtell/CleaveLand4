@@ -4,7 +4,7 @@ use strict;
 use Getopt::Std;
 use Math::CDF 'pbinom';
 
-my $version_number = "4.2";
+my $version_number = "4.3";
 my $help = help_message($version_number);
 
 # if there are no arguments, return the help message and quit
@@ -631,7 +631,7 @@ sub make_deg_density {
     if($opt_q) {
 	system "bowtie -f -v 1 --best -k 1 --norc -S $opt_n $opt_e 2> /dev/null \| sed -e 's/SO:unsorted/SO:coordinate/' 2> /dev/null \| samtools view -S -b -u - 2> /dev/null \| samtools sort - $bam_name 2> /dev/null";
     } else {
-	system "bowtie -f -v 1 --best -k 1 --norc -S $opt_n $opt_e \| sed -e 's/SO:unsorted/SO:coordinate/' \| samtools view -S -b -u - \| samtools sort - $bam_name";
+	system "bowtie -f -v 1 --best -k 1 --norc -S $opt_n $opt_e \| sed -e 's/SO:unsorted/SO:coordinate/' \| samtools view -S -b -u - 2> /dev/null \| samtools sort - $bam_name 2> /dev/null";
     }
     # Verify the bam file is there
     my $bam_file = "$bam_name" . ".bam";
@@ -1232,7 +1232,7 @@ Michael J. Axtell, Penn State University, mja18@psu.edu
 
 =head1 VERSION
 
-4.2 : September 20, 2013
+4.3 : November 7, 2013
 
 =head1 INSTALL
 

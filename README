@@ -24,11 +24,10 @@ AUTHOR
     Michael J. Axtell, Penn State University, mja18@psu.edu
 
 VERSION
-    4.2 : September 20, 2013
+    4.3 : November 7, 2013
 
 INSTALL
   Dependencies - Required Perl Modules
-
             Getopt::Std
             Math::CDF
 
@@ -42,7 +41,6 @@ INSTALL
     ('pbinom').
 
   Dependencies - PATH executables
-
             bowtie (version 0.12.x or 1.x)
             bowtie-build
             RNAplex (from Vienna RNA package)
@@ -55,7 +53,6 @@ INSTALL
     may be required for a given run.
 
   Installation
-
     Except for the above dependencies, there is no "real" installation. If
     the script is in your working directory, you can call it with
 
@@ -75,7 +72,6 @@ USAGE
     option -q (quiet mode).
 
   Options
-
     -h Print help message and quit
 
     -v Print version and quit
@@ -117,7 +113,6 @@ USAGE
     double within positions 2-13 of the query.
 
   Modes
-
     CleaveLand4 runs in one of four different modes. Each mode has a
     required set of options and a disallowed set of options, as described
     below:
@@ -140,7 +135,6 @@ USAGE
 
 METHODS
   Degradome data --> transcriptome alignments --> degradome density file creation (modes 1 and 3)
-
     Degradome data is aligned to the reference transcriptome using bowtie.
     If needed, the bowtie indices for the transcript are built with
     bowtie-build using default parameters. This results in the creation of
@@ -179,7 +173,6 @@ METHODS
     of all positions that have at least one read.
 
   Small RNA --> transcriptome alignments with GSTAr (modes 1 and 2)
-
     Potential target sites are generated with GSTAr.pl, which ships with
     CleaveLand4. Options -r and -a are passed to GSTAr. By default,
     potential target sites are sorted in descending order by MFE ratio. If
@@ -193,7 +186,6 @@ METHODS
     program.
 
   Analysis (all modes)
-
     After loading valid degradome density and GSTAr alignment files,
     CleaveLand4 first checks to ensure that the transcriptome (as noted in
     the headers) is the same. If so, analysis progresses. For each alignment
@@ -223,20 +215,17 @@ METHODS
 
 INPUT FILE FORMAT REQUIREMENTS
   Newlines
-
     All files are assumed to have "\n" as newline characters. Files with
     MS-DOS text encoding, or others, that do not conform to this assumption
     will cause unexpected behavior and likely meaningless results.
 
   Transcriptome (option -n)
-
     This must be a multiline FASTA file. The headers should be short and
     simple and devoid of whitespace (e.g. ">AT1G12345" is good, ">AT1G12345
     | this is my favorite gene | it is awesome" is not. The filename of the
     transcriptome file should also be devoid of whitespace.
 
   Degradome reads (option -e)
-
     This must be a multiline FASTA file. The reads are assumed to have
     already clipped to remove adapters. Furthermore, the reads must not have
     been collapsed in any way. In other words, each read off the sequencer
@@ -248,7 +237,6 @@ INPUT FILE FORMAT REQUIREMENTS
     represents the 5' end of an RNA.
 
   Small RNA Queries (option -u)
-
     This must be a multiline FASTA file with the full sequence of a given
     small RNA on one line (e.g. each line is either a header beginning with
     ">" or the full-length sequence of the small RNA). The headers should be
@@ -263,7 +251,6 @@ INPUT FILE FORMAT REQUIREMENTS
     RNA queries.
 
   Degradome density files (option -d)
-
     Most of the time, these will be files created by previous runs of
     CleaveLand4 that will have the suffix "_dd.txt". If you don't like the
     alignment parameters that CleaveLand4 uses, you could create your own
@@ -313,7 +300,6 @@ INPUT FILE FORMAT REQUIREMENTS
     reads are NOT shown.
 
   GSTAr query-transcriptome alignments (option -g)
-
     These are files created by GSTAr. If they were created as part of a
     CleaveLand4 run, they will have the suffix "_GSTAr.txt". They must be in
     the 'tabular' format, and have a proper header as shown below:
@@ -340,14 +326,12 @@ INPUT FILE FORMAT REQUIREMENTS
 
 OUTPUT
   Pretty format
-
     By default, CleaveLand prints hits that pass the p-value and category
     filters to STDOUT in a human-readble, verbose format that is
     self-explanatory. A header (lines beginning with "#") is printed giving
     basic information on the analysis.
 
   Tabular format
-
     If option -t is specified, any hits passing the p-value filter are
     printed in a tab-delimited format. First, a header (lines beginning with
     "#") is printed giving basic information on the analysis. After that, a
@@ -440,7 +424,6 @@ OUTPUT
 
 WARNINGS
   Don't believe the hype - part 1
-
     Under default settings, CleaveLand4 reports ALL putative slicing sites
     with ANY degradome reads at all, regardless of the liklihood of a given
     hit of being due to random chance. Without any filtering, most of your
@@ -453,7 +436,6 @@ WARNINGS
     libraries.
 
   Don't believe the hype - part 2
-
     The p-value calculation is built around the ASSUMPTION that the rank
     order of alignments for a given query reflects their liklihood of being
     functional. Under default settings, GSTAr will sort the alignments for
@@ -467,7 +449,6 @@ WARNINGS
     libraries.
 
   Not for whole genomes
-
     Degradome alignment by CleaveLand4 only searches the top strand of the
     transcriptome. Also, GSTAr holds the entire contents of the
     transcripts.fasta file in memory to speed the isolation of
@@ -479,7 +460,6 @@ WARNINGS
     analysis, where sites might be on either strand.
 
   Temp files
-
     CleaveLand4 writes several temp files during the course of a run. So,
     don't mess with them during a run. In addition, it is a very bad idea to
     have two CleaveLand4 runs operating concurrently from the same working
@@ -487,7 +467,6 @@ WARNINGS
     a run.
 
   Not too fast in modes 1 and 2 (and maybe 3).
-
     GSTAr is a very fast intermolecular RNA-RNA hybridization calculator.
     But when applied to whole transcriptomes, it is still very
     time-consuming. When running in modes 1 or 2, plan on about 90-120
@@ -497,7 +476,6 @@ WARNINGS
     great number of hits are being returned.
 
   No ambiguity codes
-
     Query sequences with characters other than A, T, U, C, or G
     (case-insensitive) will not be analyzed, and a warning will be sent to
     the user. Transcript sub-sequences for potential query alignments will
@@ -505,13 +483,11 @@ WARNINGS
     C,or G (case-insensitive).
 
   Small queries
-
     GSTAR demands that query sequences must be small (15-26 nts). Queries
     that don't meet these size requirements will not be analyzed and a
     warning sent to the user.
 
   No redundancy
-
     For a GIVEN QUERY, GSTAr alignments are non-redundant in terms of the
     slicing site of the alignment. However, a single query can have multiple
     overlapping alignment patterns that have differing predicted slicing
@@ -524,12 +500,10 @@ WARNINGS
     the putative slice sites returned by a given CleaveLand4 run.
 
   No reverse-compatibility
-
     Degradome density files created by versions of CleaveLand prior to 4.0
     are NOT compatible with CleaveLand 4. Sorry.
 
   Change in category definitions
-
     The categories used by CleaveLand4 differ slightly from those used in
     CleaveLand3 and earlier. Specifically, categories 3 and 2 now rely upon
     calculating the mean, not the median, level of coverage in the
@@ -538,7 +512,6 @@ WARNINGS
     category 2 hits much more rare, and category 3 hits much more common.
 
   Slicing at position 10
-
     CleaveLand4 only looks for evidence of slicing at position 10 relative
     to the aligned small RNA. There is no ambiguity -- data at position 11
     or 9 is not relevant to CleaveLand4. This is because, as far as I know,
