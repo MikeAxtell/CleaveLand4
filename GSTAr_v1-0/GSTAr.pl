@@ -2,7 +2,7 @@
 use strict;
 use Getopt::Std;
 
-my $version_number = "0.3";
+my $version_number = "1.0";
 my $help = help_message($version_number);
 
 # if there are no arguments, return the help message and quit
@@ -11,14 +11,14 @@ unless($ARGV[0]) {
 }
 
 # declare global variables
-our($opt_q,$opt_r,$opt_s,$opt_h,$opt_v,$opt_t,$opt_a);
+our($opt_q,$opt_r,$opt_h,$opt_v,$opt_t,$opt_a);
 
 # Initialize option defaults
 $opt_r = 0.65;
-$opt_s = 7;
+
 
 # get options
-getopts('r:s:hvqta');
+getopts('r:hvqta');
 
 # If user wants help or version, give it, and die
 if($opt_h) {
@@ -46,22 +46,11 @@ unless($opt_q) {
 }
 
 # Check dependencies
-my $bowtie_check = check_bowtie_version();
-unless($bowtie_check) {
-    die "FAIL\n\n$help";
-}
-my $bowtie_build_check = check_bowtie_build_version();
-unless($bowtie_build_check) {
-    die "FAIL\n\n$help";
-}
 my $RNAplex_check = check_RNAplex();
 unless($RNAplex_check) {
     die "FAIL\n\n$help";
 }
-#my $samtools_check = check_samtools();
-#unless($samtools_check) {
-#    die "FAIL\n\n$help";
-#}
+
 unless($opt_q) {
     print STDERR "\n";
 }
@@ -71,21 +60,9 @@ unless($opt_q) {
 unless(($opt_r > 0) and ($opt_r <= 1)) {
     die "FATAL: option r must be greater than 0 and less than or equal to 1\n\n$help";
 }
-unless(($opt_s =~ /^\d+$/) and ($opt_s >= 6) and ($opt_s <= 15)) {
-    die "FATAL: option s must be an integer between 6 and 15\n\n$help";
-}
 
-# Search for the bowtie indices
-my $ebwt_check = check_ebwt($transcripts_file);
-
-# If absent, call bowtie-build
-unless($ebwt_check) {
-    bowtie_build($transcripts_file);
-}
-
-# Hash the entire transcriptome in upper-case RNA form
+# Hash the transcriptome into memory
 my %txome = hash_transcriptome($transcripts_file);
-
 
 # Begin work, one query at a time
 unless($opt_q) {
@@ -98,7 +75,6 @@ print "\# ";
 print `date`;
 print "\# Queries: $queries_file\n";
 print "\# Transcripts: $transcripts_file\n";
-print "\# Hit seed length required to initiate RNAplex analysis (option -s): $opt_s\n";
 print "\# Minimum Free Energy Ratio cutoff (option -r): $opt_r\n";
 print "\# Sorted by: ";
 if($opt_a) {
@@ -143,24 +119,23 @@ while (<QUERIES>) {
 	print STDERR "\n\tWARNING: query sequence $header is too large. The limit is 26nts. It is not being analyzed\!\n";
 	next;
     }
-    if((length $full_qseq) < $opt_s) {
-	print STDERR "\n\tWARNING: query sequence $header is too small. It must be larger than option -s. It is not being analyzed\!\n";
+    if((length $full_qseq) < 15) {
+	print STDERR "\n\tWARNING: query sequence $header is too small. It must be larger than 14 nts. It is not being analyzed\!\n";
 	next;
     }
     
-    # Write the k-mer query fasta file
-    my $subseq_file = write_k($full_qseq);
+    $full_qseq = uc $full_qseq;
+    $full_qseq =~ s/T/U/g;
     
-    # Call bowtie and get candidate regions for RNAplex analysis
-    my %regions = regions_from_bowtie($subseq_file,$transcripts_file);
-    ##### the %regions hash has transcript names for keys, and anonymous arrays of positions for values
+    # Write the query fasta file and ge the tx lengths in the process.
+    my $q_file = write_q(\$full_qseq,\%txome);  ## The file name is GSTAr_temp.fasta
     
     # Call the master sub-routine for RNAplex analyses
-    my @first_pass = RNAplex_analysis(\%regions,\$full_qseq,\%txome,\$header);
+    my @first_pass = RNAplex_analysis(\$full_qseq,\$header,\%txome, \$q_file);
     
-    # Sort, and in the process eliminate redundant alignments
+    # Sort, and in the process eliminate redundant alignments based on slice site within the query set
     my @winners = sort_first_pass(@first_pass);
-    
+
     # Output
     unless($opt_q) {
 	my $final_count = scalar @winners;
@@ -178,10 +153,8 @@ while (<QUERIES>) {
 }
 close QUERIES;
 
-# remove temp files
-system "rm -f temp_rnas.txt";
-system "rm -f temp.fasta";
-
+# remove temp file
+system "rm -f GSTAr_temp.fasta";
 
 ###########################
 # Here be sub-routines
@@ -197,61 +170,17 @@ Options:
 -h Print help message and quit
 -v Print version and quit
 -q Quiet mode .. no log/progress information to STDERR
--t Tabular output format ... More suitable for parsing
+-t Tabular output format ... More suitable for automated parsing
 -a Sort by Allen et al. score instead of the default MFEratio
--s [integer 6..15] Hit seed length required to initiate RNAplex analysis. Default: 7
 -r [float >0..1] Minimum Free Energy Ratio cutoff. Default: 0.65
 
+
 Dependencies (must be in PATH):
-  bowtie (0.12.x OR 1.x)
-  bowtie-build
   RNAplex (from Vienna RNA Package)
 
 Documentation: perldoc GSTAr.pl
 ";
     return $message;
-}
-
-sub check_bowtie_version {
-    unless($opt_q) {
-	print STDERR "\tbowtie: ";
-    }
-    (open(BTV, "bowtie --version 2>&1 |")) || return 0;
-    my $vline = <BTV>;
-    close BTV;
-    my $version;
-    if($vline =~ /^bowtie version (\S+)/) {
-	$version = $1;
-	if(($version =~ /^0\.12/) or ($version =~ /^1\./)) {
-	    unless($opt_q) {
-		print STDERR "PASS version $version\n";
-	    }
-	    return 1;
-	} else {
-	    return 0;
-	}
-    } else {
-	return 0;
-    }
-    # should never be here
-    return 0;
-}
-
-sub check_bowtie_build_version {
-    unless($opt_q) {
-	print STDERR "\tbowtie-build: ";
-    }
-    (open(BBV, "bowtie-build --version 2>&1 |")) || return 0;
-    my $vline = <BBV>;
-    close BBV;
-    if($vline =~ /^bowtie-build version (\S+)/) {
-	unless($opt_q) {
-	    print STDERR "PASS version $1\n";
-	}
-	return 1;
-    } else { 
-	return 0;
-    }
 }
 
 sub check_RNAplex {
@@ -271,223 +200,31 @@ sub check_RNAplex {
     }
 }
 
-
-sub check_ebwt {
-    my($base) = @_;
-    unless($opt_q) {
-	print STDERR "Bowtie index files for $base ";
-    }
-    my @ebwt_suffixes = qw(.1.ebwt .2.ebwt .3.ebwt .4.ebwt .rev.1.ebwt .rev.2.ebwt);
-    my $ebwt_count = 0;
-    my $ebwt_file;
-    foreach my $ebwt_suffix (@ebwt_suffixes) {
-	$ebwt_file = "$base" . "$ebwt_suffix";
-	if(-r $ebwt_file) {
-	    ++$ebwt_count;
-	}
-    }
-    if($ebwt_count == 6) {
-	unless($opt_q) {
-	    print STDERR "PRESENT\n";
-	}
-	return 1;
-    } elsif ($ebwt_count > 0) {
-	unless($opt_q) {
-	    print STDERR "INCOMPLETE only $ebwt_count of the 6 expeted index files were found.\n";
-	}
-	die "\tABORTING .. please clean up old incompleted ebwt files for transcript $base and try again\n";
-    } else {
-	unless($opt_q) {
-	    print STDERR "ABSENT\n";
-	}
-	return 0;
-    }
-}
-
-sub bowtie_build {
-    my($fasta) = @_;
-    unless($opt_q) {
-	print STDERR "Building bowtie index for file $fasta ...\n";
-    }
-    my $log = "$fasta" . "_bowtie_build_log.txt";
-    system("bowtie-build $fasta $fasta 2>&1> $log");
-    unless($opt_q) {
-	print STDERR " Done\n";
-	print STDERR "Log for bowtie-build job is at $log\n";
-    }
-    return 1;
-}
-    
-sub write_k {
-    my($inseq) = @_;
-    my $file = "temp.fasta";
-    (open(OUT, ">$file")) || die "ABORT: Failed to open file to write in sub-routine write_k\n";
-    my %done = ();
-    my $subseq;
-    for(my $i = 0; $i <= (length $inseq) - $opt_s; ++$i) {
-	$subseq = substr($inseq,$i,$opt_s);
-	unless(exists($done{$subseq})) {
-	    print OUT ">$subseq\n$subseq\n";
-	    $done{$subseq} = 1;
-	}
-    }
-    close OUT;
-    return $file;
-}
-
-sub regions_from_bowtie {
-    my($query_file,$ebwt) = @_;
-    my %locations = ();
-    my @fields = ();
-    my $tally = 0;
-    open(BOWTIE, "bowtie -f -v 0 -a --nofw --quiet --suppress 1,2,5,6,7,8 $ebwt $query_file |");
-    while (<BOWTIE>) {
-	chomp;
-	@fields = split ("\t", $_);
-	push(@{$locations{$fields[0]}}, $fields[1]);
-    }
-    close BOWTIE;
-    
-    # sort the coordinates in each of the anonymous arrays
-    my @ts = keys %locations;
-    my @sorted = ();
-    my $last_pos;
-    my @consolidated = ();
-    foreach my $t (@ts) {
-	@sorted = sort {$a <=> $b} @{$locations{$t}};
-         # Consolidate adjacent positions
-	$last_pos = '';
-	@consolidated = ();
-	foreach my $p (@sorted) {
-	    if($last_pos) {
-		if($p - $last_pos <= $opt_s) {
-		    # merge .. which means ignoring $last_pos and allowing reset with putting into consolidated
-		} else {
-		    # add last_pos to consolidated
-		    push(@consolidated,$last_pos);
-		    ++$tally;
-		}
-	    }
-	    $last_pos = $p;
-	}
-	push(@consolidated,$last_pos); ## the last one always goes in. Also if there's just one it woudl go in here.
-	++$tally;
-	@{$locations{$t}} = @consolidated;
-    }
-    unless($opt_q) {
-	print STDERR " $tally RNAplex queries...";
-    }
-    return %locations;
-}
-	    
-sub check_samtools {
-    unless($opt_q) {
-	print STDERR "\tsamtools: ";
-    }
-    (open(SAM, "samtools 2>&1 |")) || return 0;
-    my $version;
-    while (<SAM>) {
-	chomp;
-	if($_ =~ /^Version/) {
-	    $version = $_;
-	}
-    }
-    close SAM;
-    if($version) {
-	unless($opt_q) {
-	    print STDERR "PASS $version\n";
-	}
-	return 1;
-    } else {
-	return 0;
-    }
-}
-
-sub get_tx_lens {
-    my($base) = @_;
-    my %hash = ();
-    my $fai = "$base" . ".fai";
-    (open(FAI, "$fai")) || die "ABORT: Failed to open fai index file $fai in sub-routine get_tx_lens\n";
-    my @fields = ();
-    while (<FAI>) {
-	chomp;
-	@fields = split ("\t", $_);
-	$hash{$fields[0]} = $fields[1];
-    }
-    close FAI;
-    return %hash;
-}
-
 sub RNAplex_analysis {
-    my($locations,$qseq,$txome,$query_name) = @_;  ## passed by reference
-    my $tx;
-    my @locs = ();
-    my $tx_size;
-    # Open a temp file for writing all of the RNAplex queries to
-    (open(DATA, ">temp_rnas.txt")) || die "ABORT: Failed to open a temp file for writing RNAplex queries into in sub-routine RNAplex_analysis\n";
+    my($qseq,$query_name,$txome,$qfile) = @_;  ## passed by reference
     
-    # The first entry in the temp file is a perfectly matched query
-    my $u_qseq = $$qseq;
+    # paranoia
+    my $u_qseq = uc $$qseq;
     $u_qseq =~ s/T/U/g;
-    my $perfect = reverse $u_qseq;
-    $perfect =~ tr/AUCG/UAGC/;
-
-    # Pad it with ten randomly selected based on either side
     
-    my $padded_perfect = pad_perfect($perfect,10);
-    
-    print DATA ">perfect\n$padded_perfect\n";
-    print DATA ">query\n$u_qseq\n";
+    # get the perfect MFE
         
-    while(($tx) = each %$locations) {
-	@locs = @{$$locations{$tx}};
-	foreach my $loc (@locs) {
-	    # determine the 'center' of the hit. This is the location + half of the $opt_s (k size). Recall that the locations
-	    #  are left-most mapping positions
-	    my $center = int($loc + (0.5 * $opt_s));
-	    # determine the start and stop. This is just 20nts + and - from the center
-	    my $start = $center - 20;
-	    my $stop = $center + 20;
-	    # ensure they are valid, and if not, adjust
-	    if($start < 1) {
-		$start = 1;
-	    }
-	    if(exists($$txome{$tx})) {
-		$tx_size = length $$txome{$tx};
-		if($stop > $tx_size) {
-		    $stop = $tx_size;
-		}
-	    } else {
-		die "ABORT: In sub-routine RNAplex_analysis .. lookup of transcript $tx in the txome hash failed\n";
-	    }
-	    
-	    # get ye sequence and verify
-	    my $tx_seq = substr($$txome{$tx}, ($start - 1), ($stop - $start + 1));
-	    unless($tx_seq) {
-		die "ABORT: In sub-routine RNAplex_analysis .. retrieval of subsequence $tx from $start to $stop failed\n";
-	    }
-	    
-	    # Convert ye queries to RNA form
-	    $tx_seq =~ s/T/U/g;
-	    
-	    # Require NO ambiguous characters
-	    unless($tx_seq =~ /^[AUCG]+$/) {
-		next;
-	    }
-	    
-	    # Write ye sequences to a temp file
-	    print DATA ">$tx",":","$start","-","$stop\n";
-	    print DATA "$tx_seq\n";
-	    print DATA ">query\n";
-	    print DATA "$u_qseq\n";
-	}
+    my $perfect_MFE = get_perfect_MFE($u_qseq);
+    unless($perfect_MFE) {
+	die "ABORT: Failed to get perfect MFE in sub-routine RNAplex_analysis for query sequence $u_qseq\n";
     }
-    close DATA;
     
-    # Call RNAplex
-    (open(PLEX, "RNAplex < temp_rnas.txt |")) || die "ABORT: RNAplex call failed in sub-routine RNAplex_analysis\n";
-
-    my $perfect_MFE;
+    # Interaction length is length query + 10. 
+    my $int_length = (length $u_qseq) + 10;
+    
+    # spacing left on default zero .. return maximal number of sites regardles of spacing. Redundant sites will be sorted out later
+    
+    # option -e .. 
+    my $option_e = sprintf("%.2f",($opt_r * $perfect_MFE));
+    
+    # Call it
+    (open(PLEX, "RNAplex -f 2 -e $option_e -z $int_length < $$qfile |")) || die "ABORT: Failed to open RNAplex main job in sub-routine RNAplex_analysis for query $$query_name\n";
+    
     my $plex_brax;
     my $plex_mfe;
     my @local_pos = ();
@@ -501,40 +238,28 @@ sub RNAplex_analysis {
     my @gapped = (); 
     my @out = ();
     my $outstring;
+    
+    my $tx;
+    
+    my $pline;
+    
     while (<PLEX>) {
-	# in groups of four
-	$tx = $_;
-	chomp $tx;
-	$tx =~ s/>//g;
 	
-	my $qname = <PLEX>;
-	chomp $qname;
-	$qname =~ s/>//g;
+	# test
+	#print STDERR "Working on plex line $_";
 	
-	my $plex_line = <PLEX>;
-	chomp $plex_line;
-	
-	my $junk = <PLEX>; ## an empty line
-	
-	# validate
-	my $plex_err = 0;
-	unless(($tx eq "perfect") or ($tx =~ /^\S+:\d+-\d+$/)) {
-	    $plex_err = 1;
-	}
-	unless($qname eq "query") {
-	    $plex_err = 1;
-	}
-	unless($plex_line =~ /^[\.\(]+\&/) {
-	    $plex_err = 1;
-	}
-	if($plex_err) {
-	    die "ABORT: Error in parsing RNAplex output\n";
-	}
-	
-	# If it is the perfect one, just get the MFE
-	if($tx eq "perfect") {
-	    $perfect_MFE = get_plex_MFE($plex_line);
-	} else {
+	chomp;
+	$pline = $_;
+	if($pline =~ /^>/) {
+	    $pline =~ s/>//g;
+	    unless($pline eq "query") {
+		$tx = $pline;
+	    }
+	} elsif ($pline =~ /^[\.\(]+\&/) {
+	    
+	    ## TEST
+	    #print STDERR "\tworking on bracketer pline $pline\n";
+	    
 	    ## all other data.
 	    ## ensure that the perfect_MFE has been set
 	    unless($perfect_MFE) {
@@ -542,8 +267,14 @@ sub RNAplex_analysis {
 	    }
 	    
             # check mfe ratio. If it fails op_r, cease analysis of this alignment
-	    $plex_mfe = get_plex_MFE($plex_line);
+	    $plex_mfe = get_plex_MFE($pline);
+	    
+	    #print STDERR "\tplex_mfe: $plex_mfe\n";
+
 	    $mfe_ratio = $plex_mfe / $perfect_MFE;
+	    
+	    #print STDERR "\tmfe_ratio is $mfe_ratio ";
+	    
 	    if($mfe_ratio > 1) {
 		$mfe_ratio = 1;
 	    }
@@ -551,101 +282,74 @@ sub RNAplex_analysis {
 		next;  ## enclosing loop is the <PLEX> loop. So this goes to next alignment
 	    }
 	    
+	    #print STDERR "  proceeding\n";
 	    
 	    # get the plex_brax
-	    $plex_brax = get_plex_brax($plex_line);
-
-	    # trapping error
-	    #print "plex_brax: $plex_brax\n";
+	    $plex_brax = get_plex_brax($pline);
+	    
+	    #print STDERR "\tplex_brax is $plex_brax\n";
+	    
 	    
 	    # If you are here, then the alignment qualifies for reporting.
 
 	    # Process the brax
 	    # First, pad with dots so that the length of the query is represented
-	    @local_pos = get_local_pos($plex_line);
+	    @local_pos = get_local_pos($pline);
 
-	    # trapping error
-	    #print "initial local_pos: @local_pos\n";
-	    
 	    $padded_brax = pad_plex_brax(\$plex_brax,\@local_pos,\$u_qseq);
-	    
-	    # trapping error
-	    #print "padded_brax: $padded_brax  at this point local_pos is @local_pos\n";
 	    
 	    # After pad_plex_brax above, the @local_pos array will be modified (if needed) to reflect the local
 	    #  coordinates within the transcript.
 
-	    #  Now get the subsequence of the transcript that will need to be reported.
-	    @tx_pos = get_tx_final(\@local_pos,\$tx);
-	    
-	    # trapping error
-	    #print "tx_pos: @tx_pos\n";
-	    
 	    # Ensure that the adjusted sequence location is still valid.  If not, abort analysis of this alignment
-	    if(($tx_pos[1] < 1) or
-	       ((length $$txome{$tx_pos[0]}) < $tx_pos[2])) {
+	    if(($local_pos[0] < 1) or
+	       ((length $$txome{$tx}) < $local_pos[1])) {
 		next;
 	    }
 	    
-	    $tx_ungapped_seq = substr($$txome{$tx_pos[0]}, ($tx_pos[1] - 1), ($tx_pos[2] - $tx_pos[1] + 1));
+	    $tx_ungapped_seq = substr($$txome{$tx}, ($local_pos[0] - 1), ($local_pos[1] - $local_pos[0] + 1));
 	    
 	    # Ensure that this sequence is all AUCG
 	    unless($tx_ungapped_seq =~ /^[AUCG]+$/) {
 		next;
 	    }
 	    
-	    # trapping error
-	    #print "tx_ungapped_seq: $tx_ungapped_seq\n";
-	    
 	    # Generate the initial, ungapped sequence string
 	    $ungapped = "$tx_ungapped_seq" . "&" . "$u_qseq";
 	    
-	    # trapping error
-	    #print "ungapped: $ungapped\n";
-	    
 	    # Process the alignments to remove trailing nts on the transcript
-	    @to_be_gapped = no_trailing(\$padded_brax,\$ungapped,\@tx_pos);
-	    
-	    # trapping error
-	    #print "to_be_gapped: @to_be_gapped\n";
+	    @to_be_gapped = no_trailing(\$padded_brax,\$ungapped,\@local_pos);
 	    
 	    # Gap-ify both the nt and structure alignment strings
 	    @gapped = gapify($to_be_gapped[0],$to_be_gapped[1]);
 	    
-	    # trapping error
-	    #print "gapped: @gapped\n";
-	    
 	    # Quality control
 	    my $qc = quality_control(@gapped);
 	    unless($qc) {
-		print STDERR "\nWARNING: Skipping an alignment for $$query_name at transcript $tx_pos[0] $tx_pos[1] to $tx_pos[2] because of a failed alignment parse\n\t@gapped\n";
+		print STDERR "\nWARNING: Skipping an alignment for $$query_name at transcript $tx $local_pos[0] to $local_pos[1] because of a failed alignment parse\n\t@gapped\n";
 		next;
 	    }
 	    
 	    # Begin to build output string
 	    $outstring = "$$query_name"; ## reset ..  [0] Query name
-	    $outstring .= "\t$tx_pos[0]";  ## [1] Transcript name
-	    $outstring .= "\t$tx_pos[1]"; ## [2] Transcript start position
-	    $outstring .= "\t$tx_pos[2]"; ## [3] Transcript stop position
+	    $outstring .= "\t$tx";  ## [1] Transcript name
+	    $outstring .= "\t$local_pos[0]"; ## [2] Transcript start position
+	    $outstring .= "\t$local_pos[1]"; ## [3] Transcript stop position
 	    
 	    # Determine transcript position corresponding to position 10 of the query .. the 'slicing site'
-	    my $slice_site = compute_slice_site(\@gapped,\@tx_pos);
+	    my $slice_site = compute_slice_site(\@gapped,\@local_pos);
 	    
 	    $outstring .= "\t$slice_site";  ## [4] Transcript slice position (pos 10 of query)
 	    $outstring .= "\t$perfect_MFE"; ## [5] MFE of perfect match
 	    $outstring .= "\t$plex_mfe";  ## [6] MFE of this alignment
 	    $outstring .= "\t$mfe_ratio"; ## [7] MFE Ratio of this alignment to perfect match
 	    
-	    
-	    # trapping error
-	    #print "$outstring\n";
-	    
 	    # Calculate the Allen et al. score
 	    my $allen = allen_score(@gapped);
 	    $outstring .= "\t$allen";  ## [8] Allen et al. score
 
 	    # Assess paired, unpaired, 5' SS, 3' SS, SIL, AIL, and Bulges.
-	    my @struc = assess_pairing($gapped[0],$tx_pos[1],$u_qseq);
+	    my @struc = assess_pairing($gapped[0],$local_pos[0],$u_qseq);
 	    $outstring .= "\t$struc[0]";  ## [9] Paired string
 	    $outstring .= "\t$struc[1]"; ## [10] Annotated unpaired string
 	    
@@ -665,6 +369,9 @@ sub RNAplex_analysis {
 	    #my $qs_pretty = reverse(join('',@qxs));
 	    
             #print "$ts_pretty\n$tb_pretty\n$qb_pretty\n$qs_pretty\n";
+	    
+	    # test
+	    #print "$outstring\n";
 	    
 	    push(@out,$outstring);
 	}
@@ -724,7 +431,7 @@ sub get_plex_brax {
 sub get_plex_MFE {
     my($line) = @_;
     my $mfe;
-    if($line =~ /\((-\d.*)\)$/) {
+    if($line =~ /\(([\s\-\d\.]+)\)/){
 	$mfe = $1;
     }
     if($mfe) {
@@ -749,16 +456,6 @@ sub get_local_pos {
     } else {
 	die "ABORT: Failed to parse out local coordinates from input line $line in sub-routine get_local_pos\n";
     }
-}
-
-sub count_q_mismatched {
-    my($brax,$qseq) = @_;
-    my $matches = 0;
-    while($brax =~ /\)/g) {  ## query is always the 'lower' of the two, so its pairs have ) 
-	++$matches;
-    }
-    my $mismatches = (length $qseq) - $matches;
-    return $mismatches;
 }
 
 sub pad_plex_brax {
@@ -1037,12 +734,12 @@ sub no_trailing {
     for($i = 0; $i < $n_end_trim; ++$i) {
 	$junk = shift @bleft;
 	$junk = shift @sleft;
-	++$$pos[1];
+	++$$pos[0];
     }
     for($i = 0; $i < $n_mid_trim; ++$i) {
 	$junk = pop @bleft;
 	$junk = pop @sleft;
-	--$$pos[2];
+	--$$pos[1];
     }
     
     my $new_brax_left = join('',@bleft);
@@ -1059,7 +756,7 @@ sub no_trailing {
 }
 	
 sub compute_slice_site {
-    my($gapped,$tx_pos) = @_;  ## passed by reference.  Two arrays.
+    my($gapped,$local_pos) = @_;  ## passed by reference.  Two arrays.
     my $q_seq;
     my $t_seq;
     if($$gapped[0] =~ /^(\S+)\&(\S+)$/) {
@@ -1071,7 +768,7 @@ sub compute_slice_site {
     my @q_char = split ('', $q_seq);
     my @t_char = split ('', $t_seq);
     
-    my $real_t_pos = $$tx_pos[2] + 1;
+    my $real_t_pos = $$local_pos[1] + 1;
     my $real_q_pos = 0;
     my $tch;
     
@@ -1457,14 +1154,29 @@ sub sort_first_pass {
     my $key;
     foreach my $entry (@in) {
 	@fields = split ("\t", $entry);
-	$key = "$fields[1]" . ":" . "$fields[2]" . "-" . "$fields[3]";
-	$all{$key} = $entry;
-	if($opt_a) {
-	    # sort by Allen score
-	    $sort{$key} = $fields[8];
+	$key = "$fields[1]" . ":" . "$fields[4]";  ## slice site
+	if(exists($sort{$key})) {
+	    if($opt_a) {
+		if($fields[8] < $sort{$key}) {
+		    # keep the new one
+		    $sort{$key} = $fields[8];
+		    $all{$key} = $entry;
+		}
+	    } else {
+		if($fields[7] > $sort{$key}) {
+		    # keep the new one
+		    $sort{$key} = $fields[7];
+		    $all{$key} = $entry;
+		}
+	    }
 	} else {
-	    # otherwise by MFEratio
-	    $sort{$key} = $fields[7];
+	    if($opt_a) {
+		$sort{$key} = $fields[8];
+		$all{$key} = $entry;
+	    } else {
+		$sort{$key} = $fields[7];
+		$all{$key} = $entry;
+	    }
 	}
     }
     
@@ -1573,30 +1285,6 @@ sub quality_control {
 	return 1;
     }
 }
-
-sub pad_perfect {
-    my($core,$n) = @_;
-    my $i;
-    my %bases = (
-	0 => "A",
-	1 => "U",
-	2 => "G",
-	3 => "C",
-	);
-    my $num;
-    my $front;
-    my $back;
-    for($i = 1; $i <= $n; ++$i) {
-	$num = int(rand(4));
-	$front .= "$bases{$num}";
-    }
-    for($i = 1; $i <= $n; ++$i) {
-	$num = int(rand(4));
-	$back .= "$bases{$num}";
-    }
-    my $out = "$front" . "$core" . "$back";
-    return $out;
-}
     
 sub tabular_output {
     my(@out) = @_;
@@ -1686,6 +1374,50 @@ sub pretty_output {
 	print "----------------------------------------------------------------\n";
     }
 }
+
+sub write_q {  ## passed by reference
+    my($qseq,$txome) = @_;
+    my $q_file = "GSTAr_temp.fasta";
+    (open(Q, ">$q_file")) || die "ABORT: Failed to open temp file for writing in sub-routine write_q\n";
+    
+    my $t_seq;
+    my $t_name;
+    while (($t_name,$t_seq) = each %$txome) {
+	print Q ">$t_name\n$t_seq\n>query\n$$qseq\n";
+    }
+    close Q;
+    ## test
+
+    return $q_file;
+}
+
+sub get_perfect_MFE {
+    my($seq) = @_;
+    my $perfect = reverse $seq;
+    $perfect =~ tr/AUCG/UAGC/;
+    (open(TEMP, ">GSTAr_perfect_tmp.fasta")) || die "ABORT: Failed to create a temp file in sub-routine get_perfect_MFE\n";
+    print TEMP ">perfect\n$perfect\n>Query\n$seq\n";
+    close TEMP;
+    
+    # Call RNAplex under default parameters
+    (open(PLEX, "RNAplex < GSTAr_perfect_tmp.fasta |")) || die "ABORT: RNAplex call failed in sub-routine get_perfect_MFE\n";
+    
+    my $perfect_MFE;
+    
+    while (<PLEX>) {
+	chomp;
+	if($_ =~ /^[\.\(]+\&/) {
+	    $perfect_MFE = get_plex_MFE($_);
+	    last;
+	}
+    }
+    close PLEX;
+    #print "PERFECT: $perfect_MFE\n";
+    #exit;
+    system "rm -f GSTAr_perfect_tmp.fasta";
+    return $perfect_MFE;
+}
+	    
 	
 __END__
 
@@ -1701,7 +1433,7 @@ the Free Software Foundation, either version 3 of the License, or
 (at your option) any later version.                                                                                                                                                 
                                                                                                                                                                                     
 This program is distributed in the hope that it will be useful,                                                                                                                     
-    but WITHOUT ANY WARRANTY; without even the implied warranty of                                                                                                                      
+but WITHOUT ANY WARRANTY; without even the implied warranty of                                                                                                                      
 MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the                                                                                                                       
 GNU General Public License for more details.                                                                                                                                        
                                                                                                                                                                                     
@@ -1711,7 +1443,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 =head1 SYNOPSIS
 
 GSTAr : Generic Small RNA-Transcriptome Aligner.
-Flexible RNA-hybridization based alignment of small RNAs (<=26 nts) to a transcriptome.
+
+Flexible RNAplex-based alignment of miRNAs and siRNAs (15-26 nts) to a transcriptome.
 
 =head1 AUTHOR
 
@@ -1719,34 +1452,32 @@ Michael J. Axtell, Penn State University, mja18@psu.edu
 
 =head1 VERSION
 
-0.3 : September 14, 2013
+1.0 : September 17, 2013
 
 =head1 INSTALL
 
 =head2 Dependencies
 
-perl
-bowtie (version 0.12.x or 1.x)
-bowtie-build
-RNAplex (from Vienna RNA package)
+	perl
+	RNAplex (from Vienna RNA package)
 
-bowtie, bowtie-build, and RNAplex must be executable from your PATH
+RNAplex must be executable from your PATH. GSTAr.pl was developed using RNAplex version RNAplex 2.1.3. It has not been tested on other versoins of RNAplex.
 
 =head2 Installation
 
 No "real" installation. If the script is in your working directory, you can call it with 
 
-./GSTAr.pl
+	./GSTAr.pl
 
 For convenience, you can add it to your PATH.  e.g.
 
-    sudo mv GSTAr.pl /usr/bin/
+	sudo mv GSTAr.pl /usr/bin/
 
 GSTAr.pl expects to find perl in /usr/bin/perl .. if not, edit line 1 (the hashbang) accordingly.
 
 =head1 USAGE
 
-    GSTAr.pl [options] queries.fasta transcriptome.fasta
+	GSTAr.pl [options] queries.fasta transcriptome.fasta
 
 Output alignments go to STDOUT, and can be redirected to a file with > or piped to another process with |
 
@@ -1765,38 +1496,35 @@ Options:
 -t Tabular output format ... More suitable for parsing   
                                                                                                                            
 -a Sort by Allen et al. score instead of the default MFEratio 
-                                                                                                                      
--s [integer 6..15] Hit seed length required to initiate RNAplex analysis. Default: 7    
                                                                                             
 -r [float >0..1] Minimum Free Energy Ratio cutoff. Default: 0.65
 
 =head1 METHODS
 
-=head2 Step 1 : Finding short exact matches
+GSTAr.pl is essentially a wrapper and parser for RNAplex desgined for aligning short queries (15-26nts) against the rev-comp. strand of a eukaryotic transcriptome. For each query sequence, the minimum free energy of a perfectly complelementary sequence is calculated using RNAplex under all default parameters. Following this, the same query is then analyzed against the entire transcriptome. Hits where the MFEratio (i.e. MFE / MFE-perfect) is >= the cutoff established by option r are retained and parsed.
 
-In step one, GSTAr takes in a query small RNA sequence, and breaks it up into a series of k-mers of size specified by option -s (default = 7). It then uses bowtie to find all exact matches, to the reverse complementary strand only, to each of the k-mers. If a bowtie index for the transcriptome.fasta file is not found, GSTAr will use bowtie-build to make one.  The hits are consolidated to merge overlapping regions.
+The detailed RNAplex parameters (see RNAplex man page for details) for each query analysis are 
 
-=head2 Step 2 : RNAplex analysis
+	-f 2 : Fast mode .. structure based on approximated plex model.
+	-e [minMFEratio * perfectMFE] : Minimum acceptable MFE value to keep a hit
+	-z : [10 + query_length] : Acceptable alignments can span no more than length of query + 10nts.
+	
 
-In step two, transcript regions centered on the hits found in step 1 are extended 20 nts on either side, measuring from the center of the hits.  This is followed by hybridization analysis between the full-length query sequence and the extended transcript region. For comparison, a perfectly matched entry is also calculated. The perfectly matched entry has flanking nts added to equal the overall size of the real transcript segments that are being analyzed. The flanking nucleotides surrounding the perfectly matched control site are randomly determined. The Minimum Free Energies (MFEs) are then extracted from the RNAplex results. The MFEratio is calculated as the MFE of the observed site / that of the perfect site. Note that the MFE of a perfect site will vary slightly from run to run with the same query, because the randomly selected flanking nts have slight effects on the calculation.  Alignments with an MFEratio at or above the threshold set by option -r (default 0.65) are retained.
+Slice Site is the transcript nt opposite nt 10 of the query. This is where one should look to find evidence of AGO-catalyzed slicing in the event that a) the transcript was really a target of the query at that site, and b) it really was sliced. GSTAr makes no judgements on the likelihood of either of those events, and the recording of the Slice Site position should NOT be taken as evidence that slicing exists or is even possible at that site.
 
-=head2 Step 3 : Parsing of alignments
+For a given query, all returned sites are non-redundant. Redunancy is based upon the putative slice site only. By default, the output is sorted in descending order (best to worst) according to the MFE ratio. In the alternative option -a mode, the results are instead sorted in ascending order (best to worst) according to the Allen et al. score.
 
-In step three, alignments that met the MFEratio requirement are parsed to quantify various features, and for output.
-
-Slice Site is the transcript nt opposite nt 10 of the query. This is where one would expect to find evidence of AGO-catalyzed slicing in the event that a) the transcript was really a target of the query at that site, and b) it really was sliced. GSTAr makes no judgements on the likelihood of either of those events, and the recording of the Slice Site is for convenience when using GSTAr alignments to look for actual experimental evidence of slicing.
-
-Allen et al. score: This is a score based on the position-specific penalties described by Allen et al. (2005) Cell, 121:207-221 [PMID: 15851028].  Specifically, mismatched query bases or target-bulged bases, are penalized 1. G-U wobbles are penalized 0.5. These penalties are double within positions 2-13 of the query.
+Allen et al. score: This is a score for plant miRNA/siRNA-target interactions based on the position-specific penalties described by Allen et al. (2005) Cell, 121:207-221 [PMID: 15851028].  Specifically, mismatched query bases or target-bulged bases, are penalized 1. G-U wobbles are penalized 0.5. These penalties are double within positions 2-13 of the query.
 
 =head1 WARNINGS
 
-=head2 Not a target predictor
+=head2 NOT a target predictor
 
-GSTAr is very explicitly NOT a target predictor for small RNAs. It is only an aligner. Users should make no claims as to whether the identified alignments are actually targets of the query without independent evidence of some sort. 
+GSTAr is very explicitly NOT a target predictor for miRNAs or siRNAs. It is only an aligner based on RNA-RNA hybridization thermodynamic predictions. Users should make no claims as to whether the identified alignments are actually targets of the query without independent data of some sort. 
 
-=head2 Slice Sites are not predictions of slicing
+=head2 Slice Sites are NOT predictions of slicing
 
-Although GSTAr reports a "Slicing Site" position for each alignment, this is merely for conveneince when using GSTAr alignments to guide subsequent experiments searching for AGO-catalyzed slicing evidence. No claim is made that any alignment is actually cleaved or even theoretically cleavable.
+Although GSTAr reports a "Slicing Site" position for each alignment, this is merely for conveneince when using GSTAr alignments to guide subsequent experiments searching for AGO-catalyzed slicing evidence. No claim is made that any alignment is actually AGO-cleaved or even theoretically AGO-cleavable.
 
 =head2 Not for whole genomes
 
@@ -1804,11 +1532,11 @@ GSTAr holds the entire contents of the transcripts.fasta file in memory to speed
 
 =head2 Temp files
 
-GSTAr writes two temp files to the working directory: 'temp_rnas.txt' and 'temp.fasta'. Their contents change dynamically during a run, and they will be deleted at the end of a run. So, don't mess with them during a run. In addition, it is a very bad idea to have two GSTAr runs operating concurrently from the same working directory.
+GSTAr writes temp files to the working directory. Their contents change dynamically during a run, and they will be deleted at the end of a run. So, don't mess with them during a run. In addition, it is a very bad idea to have two GSTAr runs operating concurrently from the same working directory because there will be clashes and overwrites for these temp files.
 
-=head2 Performance
+=head2 Not too fast
 
-GSTAr will become very slow (but more sensitive) with decreasing values of options -r and/or -s.
+GSTAr uses RNAplex (Tafer and Hofacker, 2008. Bioinformatics 24:2657-63, PMID: 18434344, doi:10.1093/bioinformatics/btn193), which is exceptionally fast for an inter-molecular RNA-RNA hybridization calculator. However, when applied to entire eukaryotic transcriptomes the CPU time per query is still significant. Run time is only slightly affected (much less than 2-fold) by the setting of -r. Setting tabular mode (option -t) also increases speed just a tiny bit for runs with a low option -r. In tests with the Arabidopsis transcriptome (33,602 mRNAs, total nts=51,074,197), a single 21nt miRNA query typically takes about 90-110 seconds to complete.
 
 =head2 No ambiguity codes
 
@@ -1816,7 +1544,11 @@ Query sequences with characters other than A, T, U, C, or G (case-insensitive) w
 
 =head2 Small queries
 
-Query sequences must be small (<=27 nts), but not smaller than option -s (default 7). Queries that don't meet these size requirements will not be analyzed and a warning sent to the user.
+Query sequences must be small (between 15 and 26nts). Queries that don't meet these size requirements will not be analyzed and a warning sent to the user.
+
+=head2 Redundant output
+
+GSTAr guarantees that, FOR A GIVEN QUERY, the returned alignments will be unique in terms of their PUTATIVE SLICING SITE POSITION. However, the same query could generate multiple overlapping aligments that each have different putative slice sites.  Furthermore, if different queries in a multi-query analysis have similar (or identical !) sequences, the same alignment position (based on putative slicing site position) could be returned multiple times, once for each of the similar/identical queries. Therefore, for multi-query result files, there is no guarantee of non-redundancy among the returned sites.
 
 =head1 OUTPUT
 

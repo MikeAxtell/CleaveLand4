@@ -4,7 +4,7 @@ use strict;
 use Getopt::Std;
 use Math::CDF 'pbinom';
 
-my $version_number = "4.0";
+my $version_number = "4.1";
 my $help = help_message($version_number);
 
 # if there are no arguments, return the help message and quit
@@ -13,13 +13,14 @@ unless($ARGV[0]) {
 }
 
 # declare global variables
-our($opt_h,$opt_v,$opt_q,$opt_d,$opt_e,$opt_p,$opt_o,$opt_g,$opt_u,$opt_n,$opt_a,$opt_s,$opt_r,$opt_t);
+our($opt_h,$opt_v,$opt_q,$opt_d,$opt_e,$opt_p,$opt_o,$opt_g,$opt_u,$opt_n,$opt_a,$opt_r,$opt_t,$opt_c);
 
-# Initialize opt_p default
+# Initialize opt_p and opt_c defaults
 $opt_p = 1;
+$opt_c = 4;
 
 # get options
-getopts('o:d:e:g:u:n:p:s:r:hvqlat');
+getopts('o:d:e:g:u:n:p:r:c:hvqlat');
 
 # If user wants help or version, give it, and die
 if($opt_h) {
@@ -94,6 +95,14 @@ unless($opt_p =~ /^[\.\d]+$/) {
 unless(($opt_p > 0) and ($opt_p <= 1)) {
     die "FATAL: Invalid entry for option p. Must be a number >0 and <= 1\n\n$help";
 }
+
+# Option c must be an integer between 0 and 4
+unless($opt_c =~ /^\d$/) {
+    die "FATAL: Invlaid entry for option c. Must be an integer between 0 and 4\n\n$help";
+}
+unless(($opt_c >= 0) and ($opt_c <= 4)) {
+    die "FATAL: Invlaid entry for option c. Must be an integer between 0 and 4\n\n$help";
+}    
 
 # If option o is on, ensure the directory is created, and write the R script
 my $R_script;
@@ -177,6 +186,7 @@ print "\# Degradome Density File: $dd_file\n";
 print "\# Query Alignment file: $GSTAr_file\n";
 print "\# Transcriptome: $G_header{'transcripts'}\n";
 print "\# P-value cutoff: $opt_p\n";
+print "\# Category cutoff: $opt_c\n";
 print "\# Output Format: ";
 if($opt_t) {
     print "Tabular\n";
@@ -239,7 +249,7 @@ while (<G>) {
     $chance = $deg_header{$cat} / $deg_header{'tx_ef_size'};
     $p_val = 1 - (pbinom(0,$rank,$chance));
     $slice_site = "$gfields[1]" . ":" . "$gfields[4]";
-    if($p_val <= $opt_p) {
+    if(($p_val <= $opt_p) and ($cat_digit <= $opt_c)) {
 	# check for redundancy
 	if(exists($nr_tabular{$slice_site})) {
 	    my @old_fields = split ("\t", $nr_tabular{$slice_site});
@@ -261,7 +271,7 @@ unless($opt_q) {
 
 my $n_ok = scalar(keys %nr_tabular);
 unless($opt_q) {
-    print STDERR "\nFound a total of $n_ok non-redundant putative slicing sites with p-values <= $opt_p\. Outputting results.\n";
+    print STDERR "\nFound a total of $n_ok non-redundant putative slicing sites with p-values <= $opt_p and categories <= $opt_c\. Outputting results.\n";
 }
 my @sorted_slice_sites = sort(keys %nr_tabular);
 foreach my $sss (@sorted_slice_sites) {
@@ -307,7 +317,6 @@ Options:
 -q Quiet mode .. no log/progress information to STDERR
 -a Sort small RNA / transcript alignments by Allen et al. score instead of default MFEratio -- for GSTAr
 -t Output in tabular format instead of the default verbose format
--s [integer 6..15] Hit seed length required to initiate RNAplex analysis. Default: 7 -- for GSTAr
 -r [float >0..1] Minimum Free Energy Ratio cutoff. Default: 0.65 -- for GSTAr
 -o [string] : Produce T-plots in the directory indicated by the string. If the dir does not exist, it will be created
 -d [string] : Path to degradome density file.
@@ -315,7 +324,8 @@ Options:
 -g [string] : Path to GSTAr-created tabular formatted query-transcript alignments.
 -u [string] : Path to FASTA-formatted small RNA queries 
 -n [string] : Path to FASTA-formatted transcriptome
--p [float >0..1] : p-value for reporting. Default is 1 (reports all hits).
+-p [float >0..1] : p-value for reporting. Default is 1 (no p-value filtering).
+-c [integer 0..4] : Maximum category for reporting. Default is 4 (all categories reported).
 
 Modes:
 1. Align degradome data, align small RNA queries, and analyze. 
@@ -327,15 +337,15 @@ Modes:
 3. Align degradome data, use existing small RNA query alignments, and analyze.
   REQUIRED OPTIONS: -e, -n, -g
   DISALLOWED OPTIONS: -d, -u
-  IRRELEVANT OPTIONS: -a, -s, -r
+  IRRELEVANT OPTIONS: -a, -r
 4. Use existing degradome density file and existing small RNA query alignments, and analyze.
   REQUIRED OPTIONS: -d, -g
   DISALLOWED OPTIONS: -e, -u
-  IRRELEVANT OPTIONS: -a, -s, -r
+  IRRELEVANT OPTIONS: -a, -r
 
 Dependencies (must be in PATH):
   R \[only if making T-plots\]]
-  GSTAr.pl \[modes 1 and 2\]
+  GSTAr.pl \[modes 1 and 2\ .. Version 1.0 or higher]
   bowtie (0.12.x OR 1.x) \[modes 1, 2, and 3\]
   bowtie-build \[modes 1, 2, and 3\]
   RNAplex (from Vienna RNA Package) \[modes 1 and 2\]
@@ -431,11 +441,15 @@ sub check_GSTAr_version {
     (open(GS, "GSTAr.pl -v 2>&1 |")) || return 0;
     my $version = <GS>;
     close GS;
-    if($version =~ /version/) {
-	unless($opt_q) {
-	    print STDERR "PASS $version";
+    if($version =~ /version (\d+)\.\d/) { ## must be higher than 0.x as of CleaveLand 4.1
+	if($1 < 1) {
+	    return 0;
+	} else {
+	    unless($opt_q) {
+		print STDERR "PASS $version";
+	    }
+	    return 1;
 	}
-	return 1;
     } else {
 	return 0;
     }
@@ -921,9 +935,6 @@ sub make_GSTAr_file {
     if($opt_a) {
 	$command .= " -a";
     }
-    if($opt_s) {
-	$command .= " -s $opt_s";
-    }
     if($opt_r) {
 	$command .= " -r $opt_r";
     }
@@ -1221,7 +1232,7 @@ Michael J. Axtell, Penn State University, mja18@psu.edu
 
 =head1 VERSION
 
-4.0 : September 14, 2013
+4.1 : September 17, 2013
 
 =head1 INSTALL
 
@@ -1237,7 +1248,7 @@ CleaveLand4.pl is a perl program, so it needs perl installed on your system. It 
 	bowtie (version 0.12.x or 1.x)
 	bowtie-build
 	RNAplex (from Vienna RNA package)
-	GSTAr.pl (Distributed with CleaveLand4)
+	GSTAr.pl (Version 1.0 or higher -- distrubuted with CleaveLand4)
 	R
 	samtools
 	
@@ -1274,8 +1285,6 @@ Log and progress information goes to STDERR, and can be suppressed with option -
 
 -t Output in tabular format instead of the default verbose format
 
--s [integer 6..15] Hit seed length required to initiate RNAplex analysis. Default: 7 -- for GSTAr
-
 -r [float >0..1] Minimum Free Energy Ratio cutoff. Default: 0.65 -- for GSTAr
 
 -o [string] : Produce T-plots in the directory indicated by the string. If the dir does not exist, it will be created
@@ -1290,7 +1299,9 @@ Log and progress information goes to STDERR, and can be suppressed with option -
 
 -n [string] : Path to FASTA-formatted transcriptome
 
--p [float >0..1] : p-value for reporting. Default is 1 (reports all hits).
+-p [float >0..1] : p-value for reporting. Default is 1 (no p-value filtering).
+
+-c [integer 0..4] : Maximum category for reporting. Default is 4 (all categories reported).
 
 *Allen et al. score: This is a score based on the position-specific penalties described by Allen et al. (2005) Cell, 121:207-221 [PMID: 15851028].  Specifically, mismatched query bases or target-bulged bases, are penalized 1. G-U wobbles are penalized 0.5. These penalties are double within positions 2-13 of the query.
 
@@ -1328,7 +1339,7 @@ Cateogry 0: >1 read, equal to the maximum on the transcript, when there is just 
 
 =head2 Small RNA --> transcriptome alignments with GSTAr (modes 1 and 2)
 
-Potential target sites are generated with GSTAr.pl, which ships with CleaveLand4.  Options -s, -r, and -a are passed to GSTAr. By default, potential target sites are sorted in descending order by MFE ratio. If the -a switch is present, this is changed to ascending order based on Allen et al. score. Note that decreasing the values of -s and/or -r will from their defaults will increase sensitivity but drastically decrease speed. GSTAr.pl is always called to output in tabular format by CleaveLand4.pl. Only alignments to the reverse-comp strand of the transcriptome are considered. Upon completion, a GSTAr alignment file is written to the working directory. See the GSTAr documentation for more details on this program.
+Potential target sites are generated with GSTAr.pl, which ships with CleaveLand4.  Options -r and -a are passed to GSTAr. By default, potential target sites are sorted in descending order by MFE ratio. If the -a switch is present, this is changed to ascending order based on Allen et al. score. Note that GSTAr can be expected to take 90-120 seconds per query when analyzing a typically sized transcritpome. GSTAr.pl is always called to output in tabular format by CleaveLand4.pl. Only alignments to the reverse-comp strand of the transcriptome are considered. Upon completion, a GSTAr alignment file is written to the working directory. See the GSTAr documentation for more details on this program.
 
 =head2 Analysis (all modes)
 
@@ -1336,7 +1347,7 @@ After loading valid degradome density and GSTAr alignment files, CleaveLand4 fir
 
 * The effective transcriptome size is the total number of bases in the transcriptome - (n * mean_read_size), where 'n' is the number of transcripts.  This adjustment accounts for the fact that the very ends of the transcripts could not possibly have any mapped 5' ends.
 
-Any hits with a p-value <= the cuttoff specified by option -p are output to STDOUT. By default, all hits are reported (the default p-value cutoff is 1 unless otherwise specififed by the user).
+Any hits with a p-value <= the cutoff specified by option -p AND a category <= the cutoff specified by option -c are output to STDOUT. By default, all hits are reported (option p default is 1, option c default is 4).
 
 =head1 INPUT FILE FORMAT REQUIREMENTS
 
@@ -1405,7 +1416,7 @@ After this, each line gives a one-based position, the number of 5' ends at that 
 
 These are files created by GSTAr. If they were created as part of a CleaveLand4 run, they will have the suffix "_GSTAr.txt". They must be in the 'tabular' format, and have a proper header as shown below:
 
-[line1]# GSTAr version 0.1
+[line1]# GSTAr version 1.0
 
 [line2]# Thu Sep 12 13:56:58 EDT 2013
 
@@ -1427,7 +1438,7 @@ Is is strongly recommended NOT to try to produce these files by means not involv
 
 =head2 Pretty format
 
-By default, CleaveLand prints hits that pass the p-value filer to STDOUT in a human-readble, verbose format that is self-explanatory. A header (lines beginning with "#") is printed giving basic information on the analysis.
+By default, CleaveLand prints hits that pass the p-value and category filters to STDOUT in a human-readble, verbose format that is self-explanatory. A header (lines beginning with "#") is printed giving basic information on the analysis.
 
 =head2 Tabular format
 
@@ -1477,6 +1488,7 @@ If option -t is specified, any hits passing the p-value filter are printed in a 
 
 17: Tplot_file_path: File path for the T-plot of this hit.
 
+* Note that the average does not include all of the 'zeroes' for non-occupied positions within a transcript. Instead, it is the average of all positions that have at least one read.
 =head2 T-plots
 
 If the user requests them by including the -o option, T-plots for each hit that passes the p-value cutoff are created and written to the directory specificied by option -o. The black line on the plot shows all of the degradome data, and the red dot shows the putative slicing site. The title of each T-plot indicates the transcript ("T="), the query ("Q="), and the putative slicing site ("S="), as well as the category and p-value.
@@ -1484,6 +1496,14 @@ If the user requests them by including the -o option, T-plots for each hit that 
 Existing T-plot files in the -o directory with the same name will be over-written without warning.
 
 =head1 WARNINGS
+
+=head2 Don't believe the hype - part 1
+
+Under default settings, CleaveLand4 reports ALL putative slicing sites with ANY degradome reads at all, regardless of the liklihood of a given hit of being due to random chance. Without any filtering, most of your hits probably ARE due to random chance. This means that there will be many many hits of Category 4 (just one read) and/or at very high p-values. Exercise skepticism when interpreting these results. More confidence in the reality of a given slicing event can come from restricting analysis to hits with low p-values and/or high categories, and, even better, observing the slicing event in multiple degradome libraries.
+
+=head2 Don't believe the hype - part 2
+
+The p-value calculation is built around the ASSUMPTION that the rank order of alignments for a given query reflects their liklihood of being functional. Under default settings, GSTAr will sort the alignments for each query based on descending MFE ratio. Alternatively, when option a is specified for the GSTAr run, they will be sorted in ascending order according the Allen et al. score.  The extent to which the p-values are trustworthy is dictated directly by the extent to which you believe that MFEratio or Allen et al. scores are predictive of function. If you don't believe that, you should treat the p-values with due skepticism, and focus instead on high category hits and reproducibility between libraries.
 
 =head2 Not for whole genomes
 
@@ -1493,9 +1513,9 @@ Degradome alignment by CleaveLand4 only searches the top strand of the transcrip
 
 CleaveLand4 writes several temp files during the course of a run.  So, don't mess with them during a run. In addition, it is a very bad idea to have two CleaveLand4 runs operating concurrently from the same working directory. CleaveLand4 will clean up all temp files at the conclusion of a run.
 
-=head2 Performance
+=head2 Not too fast in modes 1 and 2 (and maybe 3).
 
-GSTAr will become very slow (but perhaps more sensitive) with decreasing values of options -r and/or -s. Requesting T-plots can also slow things down a little. Bulding bowtie indices and alignment of degradome reads can also be time-consuming.
+GSTAr is a very fast intermolecular RNA-RNA hybridization calculator. But when applied to whole transcriptomes, it is still very time-consuming. When running in modes 1 or 2, plan on about 90-120 seconds per query during the GSTAr phase.  Additionally, bowtie alignments and index bulding (modes 1 or 3) can also be time-consuming. Finally, requesting T-plots can also slow things down, especially if a great number of hits are being returned.
 
 =head2 No ambiguity codes
 
@@ -1503,11 +1523,11 @@ Query sequences with characters other than A, T, U, C, or G (case-insensitive) w
 
 =head2 Small queries
 
-Query sequences must be small (<=27 nts), but not smaller than option -s (default 7). Queries that don't meet these size requirements will not be analyzed and a warning sent to the user.
+GSTAR demands that query sequences must be small (15-26 nts). Queries that don't meet these size requirements will not be analyzed and a warning sent to the user.
 
 =head2 No redundancy
 
-For a GIVEN QUERY, GSTAr alignments are non-redundant in terms of the start and stop position of the alignment. However, a single query can have multiple alignment patterns (differing in the placement of bulges or asymmetric internal loops, for instance) that have the same predicted slicing site. In addition, if multiple queries are similar in sequence, the same alignment can be present multiple times for different queries. If CleaveLand4 identifies more than one alignment at the same putative slicing site, it will only report the one with the best (lowest) p-value (subject to the maximum allowed p-value, option -p). Therefore there should be no redundancy in the putative slice sites returned by a given CleaveLand4 run.
+For a GIVEN QUERY, GSTAr alignments are non-redundant in terms of the slicing site of the alignment. However, a single query can have multiple overlapping alignment patterns that have differing predicted slicing sites. In addition, if multiple queries are similar in sequence, the same alignment (in terms of putative slicing site) can be present multiple times for different queries. If CleaveLand4 identifies more than one alignment at the same putative slicing site, it will only report the one with the best (lowest) p-value (subject to the maximum allowed p-value, option -p). Therefore there should be no redundancy in the putative slice sites returned by a given CleaveLand4 run.
 
 =head2 No reverse-compatibility
 
@@ -1519,5 +1539,5 @@ The categories used by CleaveLand4 differ slightly from those used in CleaveLand
 
 =head2 Slicing at position 10
 
-CleaveLand4 only looks for evidence of slicing at position 10 relative to the aligned small RNA. There is no ambiguity -- data at position 11 or 9 is not relevant to CleaveLand4. This is because, as far as I know, there is no direct evidence that indicated Argonaute proteins cut anywhere besides position 10. However, there IS clear evidence for isomirs: lower-abundance variants of miRNAs with alternative 5' or 3' ends. Isomirs with alternative 5' ends could certainly cause offset slicing. If you wish to search for slicing at slightly 'off' locations with CleaveLand4, you will need to explictly query with the isomirs of interest.
+CleaveLand4 only looks for evidence of slicing at position 10 relative to the aligned small RNA. There is no ambiguity -- data at position 11 or 9 is not relevant to CleaveLand4. This is because, as far as I know, there is no direct evidence showing Argonaute proteins cut anywhere besides position 10. However, there IS clear evidence for isomirs: lower-abundance variants of miRNAs with alternative 5' or 3' ends. Isomirs with alternative 5' ends could certainly cause offset slicing. If you wish to search for slicing at slightly 'off' locations with CleaveLand4, you will need to explictly query with the isomirs of interest.
 
