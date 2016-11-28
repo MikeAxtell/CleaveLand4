@@ -4,7 +4,7 @@ use strict;
 use Getopt::Std;
 use Math::CDF 'pbinom';
 
-my $version_number = "4.3";
+my $version_number = "4.4";
 my $help = help_message($version_number);
 
 # if there are no arguments, return the help message and quit
@@ -70,10 +70,10 @@ if(($mode == 1) or ($mode == 2)) {
 	die "FAIL\n\n$help";
     }
 }
-
+my $samtools_version;
 if(($mode == 1) or ($mode == 3)) {
-    my $samtools_check = check_samtools();
-    unless($samtools_check) {
+    $samtools_version = check_samtools();
+    unless($samtools_version) {
 	die "FAIL\n\n$help";
     }
 }
@@ -135,7 +135,7 @@ unless($readable) {
 # Get a degradome density file path
 my $dd_file;
 if(($mode == 1) or ($mode == 3)) {
-    $dd_file = make_deg_density();
+    $dd_file = make_deg_density($samtools_version);
 } else {
     $dd_file = $opt_d;
 }
@@ -428,7 +428,7 @@ sub check_samtools {
 	unless($opt_q) {
 	    print STDERR "PASS $version\n";
 	}
-	return 1;
+	return $version;
     } else {
 	return 0;
     }
@@ -613,6 +613,7 @@ sub verify_readable {
 }
 
 sub make_deg_density {
+    my($stv) = @_; ## samtools version
     unless($opt_q) {
 	print STDERR "\nInitiating alignment of degradome reads to transcriptome.\n";
     }
@@ -628,10 +629,19 @@ sub make_deg_density {
     
     # call the bowtie --> samtools pipeline to make a sorted bam file
     # Keep it quiet if needed
-    if($opt_q) {
-	system "bowtie -f -v 1 --best -k 1 --norc -S $opt_n $opt_e 2> /dev/null \| sed -e 's/SO:unsorted/SO:coordinate/' 2> /dev/null \| samtools view -S -b -u - 2> /dev/null \| samtools sort - $bam_name 2> /dev/null";
+    # samtools sort syntax depends on samtools version.
+    my $sort_call;
+    if($stv =~ /^Version: 1\./) {
+	my $tmp_sort = "$bam_name" . "_sorttemp";
+	my $full_bam_name = "$bam_name" . '.bam';
+	$sort_call = "samtools sort -T $tmp_sort -O bam - > $full_bam_name";
     } else {
-	system "bowtie -f -v 1 --best -k 1 --norc -S $opt_n $opt_e \| sed -e 's/SO:unsorted/SO:coordinate/' \| samtools view -S -b -u - 2> /dev/null \| samtools sort - $bam_name 2> /dev/null";
+	$sort_call = "samtools sort - $bam_name";
+    }
+    if($opt_q) {
+	system "bowtie -f -v 1 --best -k 1 --norc -S $opt_n $opt_e 2> /dev/null \| sed -e 's/SO:unsorted/SO:coordinate/' 2> /dev/null \| samtools view -S -b -u - 2> /dev/null \| $sort_call 2> /dev/null";
+    } else {
+	system "bowtie -f -v 1 --best -k 1 --norc -S $opt_n $opt_e \| sed -e 's/SO:unsorted/SO:coordinate/' \| samtools view -S -b -u - 2> /dev/null \| $sort_call 2> /dev/null";
     }
     # Verify the bam file is there
     my $bam_file = "$bam_name" . ".bam";
