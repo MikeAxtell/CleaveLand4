@@ -4,7 +4,7 @@ use strict;
 use Getopt::Std;
 use Math::CDF 'pbinom';
 
-my $version_number = "4.4";
+my $version_number = "4.5";
 my $help = help_message($version_number);
 
 # if there are no arguments, return the help message and quit
@@ -360,40 +360,34 @@ sub check_bowtie_version {
     unless($opt_q) {
 	print STDERR "\tbowtie: ";
     }
-    (open(BTV, "bowtie --version |")) || return 0;
+    open(BTV, "which bowtie |");
     my $vline = <BTV>;
     close BTV;
-    my $version;
-    if($vline =~ /^bowtie version (\S+)/) {
-	$version = $1;
-	if(($version =~ /^0\.12/) or ($version =~ /^1\./)) {
-	    unless($opt_q) {
-		print STDERR "PASS version $version\n";
-	    }
-	    return 1;
-	} else {
-	    return 0;
-	}
+    unless($vline) {
+	return 0;
+    }
+    if($vline =~ /bowtie$/) {
+	print STDERR "PASS: $vline";
+	return 1;
     } else {
 	return 0;
     }
-    # should never be here
-    return 0;
 }
 
 sub check_bowtie_build_version {
     unless($opt_q) {
 	print STDERR "\tbowtie-build: ";
     }
-    (open(BBV, "bowtie-build --version |")) || return 0;
-    my $vline = <BBV>;
-    close BBV;
-    if($vline =~ /^bowtie-build version (\S+)/) {
-	unless($opt_q) {
-	    print STDERR "PASS version $1\n";
-	}
+    open(BTV, "which bowtie-build |");
+    my $vline = <BTV>;
+    close BTV;
+    unless($vline) {
+	return 0;
+    }
+    if($vline =~ /bowtie-build$/) {
+	print STDERR "PASS: $vline";
 	return 1;
-    } else { 
+    } else {
 	return 0;
     }
 }
@@ -1217,7 +1211,7 @@ __END__
 
 CleaveLand4.pl
 
-Copyright (c) 2013 Michael J. Axtell
+Copyright (c) 2013-2018 Michael J. Axtell
 
 This program is free software: you can redistribute it and/or modify                                                                                                                
 it under the terms of the GNU General Public License as published by                                                                                                                
@@ -1242,7 +1236,7 @@ Michael J. Axtell, Penn State University, mja18@psu.edu
 
 =head1 VERSION
 
-4.3 : November 7, 2013
+4.5 : July 11, 2018
 
 =head1 INSTALL
 
