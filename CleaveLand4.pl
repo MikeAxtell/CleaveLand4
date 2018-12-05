@@ -1104,7 +1104,7 @@ sub pretty_report_hit {
     
     # Now, print the hit information
     print "\nDegradome data file: $dd_file\n";
-    print "Degardome Category: $cat\n";
+    print "Degradome Category: $cat\n";
     print "Degradome p-value: $p_val\n";
     print "T-Plot file: $tfile\n\n";
     # And the details
